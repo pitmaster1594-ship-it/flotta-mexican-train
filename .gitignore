@@ -1,0 +1,6 @@
+node_modules/
+public/
+.wrangler/
+.dev.vars*
+.env*
+test-results/
