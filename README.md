@@ -29,7 +29,7 @@ Choose the starting double before starting a new game:
 - **9:** 10 rounds (9 down to blank).
 - **6:** 7 rounds (6 down to blank).
 
-All three choices keep the double-12 deck and 15 tiles per player.
+All three choices keep the double-12 deck and 15 tiles per player. The starting player rotates each round in normal turn order, beginning with You (or Player 1).
 
 The game automatically saves after updates. **Save & exit** pauses play and returns to the menu; **Resume saved game** restores the scores, trains, tile order, boneyard, and current turn. A new game replaces the single saved game after confirmation. Two-player games show the private reveal screen when resumed.
 
