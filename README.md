@@ -21,4 +21,18 @@ Then visit http://localhost:8000. No build step or installation is needed.
 - Drag hand tiles directly to reorder them, including between rows. For an alternative, tap **Arrange tiles**, tap a tile, then tap another tile to insert it before that tile. Left/right, flip, and sort controls are also available. Tap **Done arranging** to resume playing.
 - Two-player mode hides each human hand behind a reveal screen.
 
-The in-game house rules explain doubles, drawing, passing, and scoring. Games currently stay in memory only; refreshing the page starts over.
+## Game length and saving
+
+Choose the starting double before starting a new game:
+
+- **12:** 13 rounds (12 down to blank).
+- **9:** 10 rounds (9 down to blank).
+- **6:** 7 rounds (6 down to blank).
+
+All three choices keep the double-12 deck and 15 tiles per player.
+
+The game automatically saves after updates. **Save & exit** pauses play and returns to the menu; **Resume saved game** restores the scores, trains, tile order, boneyard, and current turn. A new game replaces the single saved game after confirmation. Two-player games show the private reveal screen when resumed.
+
+Saves stay in the same browser on the same device. Clearing browser storage removes them. If saving is blocked or storage is full, the game shows a warning and Save & exit keeps the current game open.
+
+The in-game house rules explain doubles, drawing, passing, and scoring.
