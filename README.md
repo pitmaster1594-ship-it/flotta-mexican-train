@@ -5,6 +5,9 @@ A double-12 dominoes game for one player against three computers, two players sh
 Local play needs no installation. Online multiplayer uses a Cloudflare Worker
 and SQLite Durable Objects. See [deployment and multiplayer setup](DEPLOYMENT.md).
 
+[Play the game](https://pitmaster1594-ship-it.github.io/flotta-mexican-train/)
+or [open the Cloudflare game](https://flotta-mexican-train.pitmaster1594.workers.dev).
+
 ## Run locally
 
 Open `index.html` in a browser, or serve this directory:
