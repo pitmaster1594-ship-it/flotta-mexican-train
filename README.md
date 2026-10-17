@@ -49,6 +49,9 @@ Choose **1, 2, 3, or 4 human players**, then **Create private room** (or **Creat
 on the server, support reconnection, and expire after 30 days without play.
 **Resume online room** restores your seat on the same browser and device.
 
+If a device or network cannot establish the live socket, the game automatically
+uses authenticated HTTPS synchronization for the same room and private hand.
+
 Your local saved game remains separate. The online menu appears only when the
 configured room service is available. The GitHub Pages link continues to support
 local play even before the Cloudflare service is deployed.

@@ -16,6 +16,10 @@
       this.onState = onState;
       this.onStatus = onStatus;
       this.available = false;
+      this.httpSync = false;
+      this.transport = 'socket';
+      this.fatal = false;
+      this.pendingId = null;
       this.maxHumans = 2;
       this.active = false;
       this.connected = false;
@@ -58,6 +62,7 @@
         this.endpoint = endpoint.origin;
         this.available = true;
         this.maxHumans = info.maxHumans === 4 ? 4 : 2;
+        this.httpSync = info.httpSync === true;
         if (this.stored?.endpoint !== this.endpoint) this.stored = null;
         this.onStatus();
       } catch { /* Local play remains available when the service cannot be reached. */ }
@@ -111,81 +116,196 @@
       if (!this.active || !this.session) return;
       clearTimeout(this.retry);
       clearTimeout(this.commandTimeout);
+      clearTimeout(this.socketTimeout);
       const generation = ++this.generation;
       this.socket?.close();
+      this.socket = null;
       this.connected = false;
       this.busy = false;
+      this.pendingId = null;
+      this.fatal = false;
+      this.failures = 0;
+      this.message = '';
+      if (this.transport === 'http') {
+        this.pollHTTP(generation);
+        this.onStatus();
+        return;
+      }
       const url = new URL(`/api/rooms/${this.session.code}/socket`, this.session.endpoint);
       url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-      const socket = this.socket = new WebSocket(url, ['flotta-v1', `auth.${this.session.token}`]);
-      socket.addEventListener('open', () => {
-        if (generation !== this.generation) return;
-        // Wait for the authoritative snapshot before enabling actions.
-        this.message = '';
-      });
+      let socket;
+      try { socket = this.socket = new WebSocket(url, ['flotta-v1', `auth.${this.session.token}`]); }
+      catch { this.useHTTP(generation); return; }
+      // A socket may open without ever delivering the first snapshot on a
+      // suspended mobile connection. HTTPS can recover the same saved seat.
+      this.socketTimeout = setTimeout(() => this.useHTTP(generation), 5000);
       socket.addEventListener('message', event => {
         if (generation !== this.generation) return;
         let data;
         try { data = JSON.parse(event.data); } catch { return; }
         if (data.type === 'error') { this.message = data.error; this.onStatus(); return; }
-        if (data.type !== 'state' || data.seat !== this.session.seat) return;
-        this.connected = true;
-        this.failures = 0;
-        this.busy = false;
-        this.waiting = data.waiting;
-        this.lobby = data.lobby ?? null;
-        this.lastState = data.state;
-        clearTimeout(this.commandTimeout);
-        this.onState(data.state);
+        this.acceptSnapshot(data);
       });
       socket.addEventListener('close', event => {
         if (generation !== this.generation || !this.active) return;
+        clearTimeout(this.socketTimeout);
+        clearTimeout(this.commandTimeout);
         this.connected = false;
         this.busy = false;
-        clearTimeout(this.commandTimeout);
+        this.pendingId = null;
         if (event.code === 4001) {
           this.message = 'This player is open in another tab. Close that tab, then tap Reconnect here.';
           this.onStatus();
           return;
         }
-        this.failures++;
-        if (this.failures >= 8) {
-          this.message = 'Could not reconnect. Check your connection and tap Reconnect. Rooms expire after 30 days without play.';
-          this.onStatus();
-          return;
-        }
-        this.message = 'Connection interrupted. Reconnecting… Your game is saved in the room.';
-        this.onStatus();
-        this.retry = setTimeout(() => this.connect(), Math.min(30000, 1000 * 2 ** this.failures));
+        this.useHTTP(generation);
       });
-      socket.addEventListener('error', () => { /* close drives reconnects. */ });
+      socket.addEventListener('error', () => { /* close or the timeout starts recovery. */ });
       this.onStatus();
     }
 
+    acceptSnapshot(data) {
+      if (data.type !== 'state' || data.seat !== this.session?.seat) return;
+      const wasConnected = this.connected, wasBusy = this.busy;
+      const previousRevision = this.lastState?.revision;
+      const previousWaiting = this.waiting;
+      const lobbyChanged = JSON.stringify(this.lobby) !== JSON.stringify(data.lobby ?? null);
+      this.connected = true;
+      this.fatal = false;
+      this.failures = 0;
+      if (!this.pendingId || data.ackId === this.pendingId
+          || (!this.httpSync && data.state?.revision !== previousRevision)) {
+        this.busy = false;
+        this.pendingId = null;
+        clearTimeout(this.commandTimeout);
+      }
+      clearTimeout(this.socketTimeout);
+      // Overlapping HTTPS reads can finish after a newer action response.
+      if (this.lastState && (!data.state || data.state.revision < this.lastState.revision)) {
+        if (wasBusy !== this.busy) this.onStatus();
+        return;
+      }
+      this.waiting = data.waiting;
+      this.lobby = data.lobby ?? null;
+      this.lastState = data.state;
+      // Polling an unchanged board must not interrupt selecting or dragging tiles.
+      if (!wasConnected || previousRevision !== data.state?.revision || previousWaiting !== data.waiting) this.onState(data.state);
+      else if (wasBusy !== this.busy || (this.waiting && lobbyChanged)) this.onStatus();
+    }
+
+    useHTTP(generation) {
+      if (!this.active || generation !== this.generation) return;
+      clearTimeout(this.socketTimeout);
+      clearTimeout(this.commandTimeout);
+      if (!this.httpSync) {
+        this.connected = false;
+        this.message = 'Connection interrupted. Reconnecting…';
+        this.onStatus();
+        this.retry = setTimeout(() => this.connect(), 3000);
+        return;
+      }
+      ++this.generation;
+      this.socket?.close();
+      this.socket = null;
+      this.transport = 'http';
+      this.connected = false;
+      this.busy = false;
+      this.pendingId = null;
+      this.message = 'Connecting…';
+      this.pollHTTP(this.generation);
+      this.onStatus();
+    }
+
+    async pollHTTP(generation) {
+      if (!this.active || generation !== this.generation || this.transport !== 'http') return;
+      try {
+        const { response, data } = await requestJSON(
+          `${this.session.endpoint}/api/rooms/${this.session.code}/state`, {
+            cache: 'no-store', credentials: 'omit',
+            headers: { Authorization: `Bearer ${this.session.token}` },
+          });
+        if (!this.active || generation !== this.generation) return;
+        if (!response.ok) {
+          this.message = data.error || 'Could not open this saved room.';
+          this.fatal = response.status === 403 || response.status === 404;
+          if (this.fatal) { this.connected = false; this.onStatus(); return; }
+          throw new Error(this.message);
+        }
+        this.message = '';
+        this.acceptSnapshot(data);
+      } catch {
+        if (!this.active || generation !== this.generation) return;
+        this.connected = false;
+        this.failures++;
+        this.message = this.failures >= 8 ? 'Could not connect. Check your connection, then tap Reconnect.' : 'Connection interrupted. Retrying…';
+        this.onStatus();
+      }
+      if (this.active && generation === this.generation && this.failures < 8 && !this.fatal) {
+        const delay = this.connected ? (document.visibilityState === 'hidden' ? 10000 : 2000) : Math.min(30000, 1000 * 2 ** this.failures);
+        this.retry = setTimeout(() => this.pollHTTP(generation), delay);
+      }
+    }
+
     send(action) {
-      if (!this.active || !this.connected || this.busy || this.socket?.readyState !== WebSocket.OPEN) return false;
+      if (!this.active || !this.connected || this.busy) return false;
+      if (this.transport === 'socket' && this.socket?.readyState !== WebSocket.OPEN) return false;
       if (!this.lastState && !(action.type === 'start' && this.lobby?.canStart)) return false;
+      const command = { ...action, revision: this.lastState?.revision ?? 0, id: crypto.randomUUID() };
       this.busy = true;
+      this.pendingId = command.id;
       this.message = '';
-      this.socket.send(JSON.stringify({ ...action, revision: this.lastState?.revision ?? 0, id: crypto.randomUUID() }));
+      if (this.transport === 'http') this.sendHTTP(command, this.generation);
+      else {
+        try { this.socket.send(JSON.stringify(command)); }
+        catch { this.useHTTP(this.generation); return false; }
+      }
       this.commandTimeout = setTimeout(() => {
         if (!this.active) return;
-        // Never replay a turn blindly after a timeout. Reconnect to read the stored result.
-        this.connect();
-        this.onStatus();
-      }, 8000);
+        // Recover the stored result; never blindly resend an uncertain turn.
+        if (this.transport === 'socket') this.useHTTP(this.generation);
+        else this.connect();
+      }, 12000);
       this.onStatus();
       return true;
+    }
+
+    async sendHTTP(command, generation) {
+      try {
+        const { response, data } = await requestJSON(
+          `${this.session.endpoint}/api/rooms/${this.session.code}/actions`, {
+            method: 'POST', credentials: 'omit',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.session.token}` },
+            body: JSON.stringify(command),
+          });
+        if (!this.active || generation !== this.generation) return;
+        if (response.ok) this.acceptSnapshot(data);
+        else {
+          if (data.snapshot) this.acceptSnapshot(data.snapshot);
+          this.busy = false;
+          this.pendingId = null;
+          clearTimeout(this.commandTimeout);
+          this.message = data.error || 'Could not apply that move. Reconnect to refresh your board.';
+          this.onStatus();
+        }
+      } catch {
+        if (!this.active || generation !== this.generation) return;
+        // The response may have been lost after saving the action. Read it back.
+        this.connect();
+      }
     }
 
     leave() {
       this.active = false;
       this.connected = false;
       this.waiting = false;
+      this.pendingId = null;
+      this.transport = 'socket';
+      this.fatal = false;
       this.busy = false;
       ++this.generation;
       clearTimeout(this.retry);
       clearTimeout(this.commandTimeout);
+      clearTimeout(this.socketTimeout);
       this.socket?.close();
       this.socket = null;
       this.lastState = null;

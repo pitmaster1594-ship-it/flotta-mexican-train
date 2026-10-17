@@ -98,8 +98,16 @@ scoring, and agreement with the existing local rules. `test:rooms` checks the
 real Durable Object service, synchronization, private hands, reconnection,
 duplicate actions, stale revisions, and origin restrictions.
 
-The service uses server-authoritative moves and WebSocket hibernation. Idle
-rooms do not poll. Source assets are copied to `public/` by the build; backend
+The service uses server-authoritative moves and WebSocket hibernation. Healthy
+socket connections do not poll. If sockets are blocked or fail to deliver an
+initial snapshot within five seconds, the client uses authenticated HTTPS
+state reads and actions instead. Visible fallback clients read updates every
+two seconds; background reads slow to ten seconds. Both transports validate
+the same private seat, move revisions, and action IDs. HTTPS credentials stay
+in the Authorization header, never in room codes or URLs. This fallback uses
+additional requests against the same Cloudflare quotas.
+
+Source assets are copied to `public/` by the build; backend
 files, credentials, and development tools are not published as website assets.
 
 ## Browser regression tests

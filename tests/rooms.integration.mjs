@@ -171,3 +171,70 @@ test('cross-origin requests and invalid room codes are rejected', async () => {
     assert.equal(invalidCount.status, 400);
   }
 });
+
+test('HTTPS synchronization authenticates each seat and shares the same saved game', async () => {
+  const created = await fetch(base + '/api/rooms', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ startEngine: 6, humanCount: 4 }),
+  });
+  const host = await created.json(), sessions = [host];
+  for (let i = 1; i < 4; i++) {
+    const response = await fetch(`${base}/api/rooms/${host.code}/join`, { method: 'POST' });
+    sessions.push(await response.json());
+  }
+  async function state(session) {
+    const response = await fetch(`${base}/api/rooms/${host.code}/state`, {
+      headers: { Authorization: `Bearer ${session.token}` },
+    });
+    assert.equal(response.status, 200);
+    return response.json();
+  }
+  async function action(session, command) {
+    return fetch(`${base}/api/rooms/${host.code}/actions`, {
+      method: 'POST', headers: { Authorization: `Bearer ${session.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(command),
+    });
+  }
+  const invalid = await fetch(`${base}/api/rooms/${host.code}/state`, { headers: { Authorization: 'Bearer invalid' } });
+  assert.equal(invalid.status, 403);
+  assert.equal((await invalid.json()).snapshot, undefined);
+  for (const session of sessions) await state(session);
+  assert.equal((await state(host)).lobby.canStart, true);
+  const denied = await action(sessions[3], { id: 'guest-cannot-start', type: 'start', revision: 0 });
+  assert.equal(denied.status, 400);
+  const started = await action(host, { id: 'http-start', type: 'start', revision: 0 });
+  assert.equal(started.status, 200);
+  const startState = await started.json();
+  assert.equal(startState.ackId, 'http-start');
+  assert.equal(startState.state.revision, 1);
+  for (const session of sessions) {
+    const view = await state(session);
+    assert.equal(view.seat, session.seat);
+    for (let seat = 0; seat < 4; seat++) assert.equal(view.state.players[seat].hand.length, seat === session.seat ? 15 : 0);
+  }
+  const last = sessions[3], view = await state(last);
+  const order = [...view.state.players[last.seat].hand].reverse().map(t => ({ id: t.id, flipped: true }));
+  const arrange = { id: 'http-arrange', type: 'arrange', revision: 1, tiles: order };
+  const saved = await action(last, arrange);
+  const snapshot = await saved.json();
+  assert.equal(snapshot.ackId, 'http-arrange');
+  assert.equal(snapshot.state.revision, 2);
+  assert.equal((await (await action(last, arrange)).json()).state.revision, 2, 'HTTPS retry cannot duplicate an action');
+  const socket = connect(last);
+  try {
+    const restored = await socket.wait();
+    assert.equal(restored.state.revision, 2);
+    assert.deepEqual(restored.state.players[last.seat].hand.map(t => t.id), order.map(t => t.id));
+  } finally { socket.socket.close(); }
+  const spoof = await action(last, { id: 'spoof-seat', type: 'draw', revision: 2, seat: 0 });
+  assert.equal(spoof.status, 400);
+  assert.match((await spoof.json()).error, /not your turn/i);
+  const preflight = await fetch(`${base}/api/rooms/${host.code}/state`, {
+    method: 'OPTIONS', headers: {
+      Origin: 'https://pitmaster1594-ship-it.github.io',
+      'Access-Control-Request-Method': 'GET', 'Access-Control-Request-Headers': 'authorization',
+    },
+  });
+  assert.equal(preflight.status, 204);
+  assert.match(preflight.headers.get('Access-Control-Allow-Headers'), /authorization/i);
+});
