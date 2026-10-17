@@ -70,10 +70,10 @@ test('room actions are authenticated, private, versioned, persisted, and idempot
   assert.equal(updated.state.current, 0, 'arranging does not consume a turn');
 
   guest.socket.send(JSON.stringify(action));
-  assert.equal((await guest.wait(x => x.type === 'state')).state.revision, 2, 'duplicate does not apply twice');
+  assert.equal((await guest.wait(x => x.type === 'state' && x.state?.revision === 2)).state.revision, 2, 'duplicate does not apply twice');
   host.socket.send(JSON.stringify({ id: 'stale', type: 'draw', revision: 1 }));
   assert.match((await host.wait(x => x.type === 'error')).error, /changed/i);
-  assert.equal((await host.wait(x => x.type === 'state')).state.revision, 2);
+  assert.equal((await host.wait(x => x.type === 'state' && x.state?.revision === 2)).state.revision, 2);
 
   guest.socket.close();
   const resumed = connect(sessions.guest);
@@ -84,6 +84,78 @@ test('room actions are authenticated, private, versioned, persisted, and idempot
   assert.ok(restored.state.players[2].hand.every(t => t.flipped));
 });
 
+for (const count of [1, 2, 3, 4]) test(`${count}-human lobby assigns private seats, waits for connections, and starts once`, async t => {
+  const response = await fetch(base + '/api/rooms', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ startEngine: 9, humanCount: count }),
+  });
+  assert.equal(response.status, 201);
+  const session = await response.json();
+  const host = connect(session);
+  const sockets = [host];
+  t.after(() => sockets.forEach(client => client.socket.close()));
+  const initial = await host.wait();
+  assert.equal(initial.state, null);
+  assert.equal(initial.lobby.humanCount, count);
+  assert.equal(initial.lobby.canStart, count === 1);
+  assert.equal(initial.lobby.players.filter(p => p.human).length, count);
+
+  if (count > 1) {
+    host.socket.send(JSON.stringify({ id: 'early-start', type: 'start', revision: 0 }));
+    assert.match((await host.wait(x => x.type === 'error')).error, /every player/i);
+  }
+  const responses = await Promise.all(Array.from({ length: count - 1 }, () =>
+    fetch(`${base}/api/rooms/${session.code}/join`, { method: 'POST' })));
+  const guests = [];
+  for (const response of responses) {
+    assert.equal(response.status, 201);
+    guests.push(await response.json());
+  }
+  assert.equal(new Set([session, ...guests].map(s => s.seat)).size, count);
+  if (count > 1) {
+    const filled = await host.wait(x => x.type === 'state' && x.lobby.players.filter(p => p.joined).length === count);
+    assert.equal(filled.state, null, 'joining never deals before the host starts');
+    assert.equal(filled.lobby.canStart, false, 'joining without a socket is not connected');
+  }
+  for (const guestSession of guests) {
+    const guest = connect(guestSession);
+    sockets.push(guest);
+    const view = await guest.wait();
+    assert.equal(view.state, null);
+    assert.equal(view.seat, guestSession.seat);
+    guest.socket.send(JSON.stringify({ id: 'guest-start', type: 'start', revision: 0 }));
+    assert.match((await guest.wait(x => x.type === 'error')).error, /only Player 1/i);
+  }
+  if (count > 1) await host.wait(x => x.type === 'state' && x.lobby.canStart);
+  const full = await fetch(`${base}/api/rooms/${session.code}/join`, { method: 'POST' });
+  assert.equal(full.status, 409);
+  const start = { id: 'start-once', type: 'start', revision: 0 };
+  host.socket.send(JSON.stringify(start));
+  const started = await host.wait(x => x.type === 'state' && x.state?.revision === 1);
+  assert.equal(started.state.humanCount, count);
+  assert.equal(started.state.players.filter(p => !p.human).length, 4 - count);
+  for (let i = 0; i < guests.length; i++) {
+    const view = await sockets[i + 1].wait(x => x.type === 'state' && x.state?.revision === 1);
+    for (let seat = 0; seat < 4; seat++) assert.equal(view.state.players[seat].hand.length, seat === guests[i].seat ? 15 : 0);
+  }
+  host.socket.send(JSON.stringify(start));
+  const duplicate = await host.wait(x => x.type === 'state' && x.state?.revision === 1);
+  assert.deepEqual(duplicate.state, started.state, 'duplicate start cannot redeal');
+
+  if (guests.length) {
+    const last = guests.at(-1), client = sockets.at(-1);
+    const own = started.state.players[last.seat];
+    assert.equal(own.hand.length, 0, 'host never receives this seat’s hand');
+    client.socket.close();
+    const resumed = connect(last);
+    sockets.push(resumed);
+    const restored = await resumed.wait();
+    assert.equal(restored.seat, last.seat);
+    assert.equal(restored.state.humanCount, count);
+    assert.equal(restored.state.players[last.seat].hand.length, 15);
+  }
+});
+
 test('cross-origin requests and invalid room codes are rejected', async () => {
   const blocked = await fetch(base + '/api/rooms', { method: 'POST', headers: { Origin: 'https://unrelated.example', 'Content-Type': 'application/json' }, body: JSON.stringify({ startEngine: 12 }) });
   assert.equal(blocked.status, 403);
@@ -91,4 +163,11 @@ test('cross-origin requests and invalid room codes are rejected', async () => {
   assert.equal(invalid.status, 404);
   const wrongStart = await fetch(base + '/api/rooms', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ startEngine: 1 }) });
   assert.equal(wrongStart.status, 400);
+  for (const humanCount of [0, 5, 1.5, '4', null]) {
+    const invalidCount = await fetch(base + '/api/rooms', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ startEngine: 12, humanCount }),
+    });
+    assert.equal(invalidCount.status, 400);
+  }
 });

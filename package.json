@@ -7,7 +7,8 @@
     "dev": "npm run build && wrangler dev --ip 127.0.0.1",
     "test": "node --test tests/*.test.mjs",
     "deploy": "npm run build && wrangler deploy",
-    "test:rooms": "node --test tests/rooms.integration.mjs"
+    "test:rooms": "node --test tests/rooms.integration.mjs",
+    "test:browser": "playwright test"
   },
   "repository": {
     "type": "git",
@@ -21,6 +22,7 @@
   },
   "homepage": "https://github.com/pitmaster1594-ship-it/flotta-mexican-train#readme",
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "wrangler": "^4.151.1"
   },
   "private": true,

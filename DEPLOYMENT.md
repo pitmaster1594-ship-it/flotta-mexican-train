@@ -27,13 +27,20 @@ migration. No domain purchase or separate database setup is needed. The
 configuration supports Workers Free and does not enable a paid subscription;
 Cloudflare's current free-plan quotas still apply.
 
-## Play on two iPads
+## Play with one to four humans
 
-1. Open the deployed game website on both iPads.
-2. On the first, choose double 12, 9, or 6, then **Create private room**.
-3. On the second, enter the first iPad's eight-character code and tap **Join room**.
-4. The game starts with two human players and two computers. Each iPad sees only
-   its own hand. Player 1 advances to the next round when a round ends.
+1. Open the game website on each person's iPad, phone, or browser.
+2. The host chooses double 12, 9, or 6 and **1, 2, 3, or 4 human players**.
+3. Tap **Create private room** (or **Create solo room** for one human).
+4. Other humans enter the host's eight-character code and tap **Join room**.
+5. The lobby lists all four seats, showing joined players and computers. Once
+   all selected humans are connected, Player 1 taps **Start game**.
+6. Computers fill unused seats: 1 human has 3 computers, 2 humans have 2 computers,
+   3 humans have 1 computer, and 4 humans have no computers.
+
+Each device sees only its own hand. Player 1 advances to the next round when a
+round ends. Starting players rotate through all four seats. Previously saved
+two-player rooms retain their seats and can still be resumed.
 
 Keep the room code private: it invites the second player. A private seat
 credential is saved automatically in each iPad's browser and is never included
@@ -94,3 +101,18 @@ duplicate actions, stale revisions, and origin restrictions.
 The service uses server-authoritative moves and WebSocket hibernation. Idle
 rooms do not poll. Source assets are copied to `public/` by the build; backend
 files, credentials, and development tools are not published as website assets.
+
+## Browser regression tests
+
+```sh
+npx playwright install chromium
+npm run test:browser
+```
+
+The browser tests start an isolated local service and use independent browser
+contexts for every human. They check 1–4-player lobbies, host-only starting,
+private hands, tile arrangement, reconnection, and a full four-human round with
+scoring and the next starting player. To use a preinstalled Chromium, set
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE` to its executable path. To test a deployed
+service, set `FLOTTA_BROWSER_URL` to its HTTPS game URL; tests then create fresh
+private rooms on that service instead of starting a local one.

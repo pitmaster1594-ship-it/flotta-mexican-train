@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createGame, applyAction, computerStep, moves, privateView, score } from '../server/game.mjs';
+import { createGame, applyAction, computerStep, moves, privateView, score, humanSeats, roomPlayers } from '../server/game.mjs';
 
 function seeded(seed) {
   return () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
@@ -17,6 +17,22 @@ test('all starting doubles deal 90 unique tiles and exclude the engine', () => {
     assert.ok(!tiles(game).some(t => t.a === start && t.b === start));
   }
   assert.throws(() => createGame(8));
+});
+
+test('one to four humans occupy distinct seats and computers fill the table', () => {
+  assert.deepEqual(humanSeats(2), [0, 2], 'existing opposite seats stay compatible');
+  for (const count of [1, 2, 3, 4]) {
+    const game = createGame(9, seeded(count), count);
+    assert.equal(game.humanCount, count);
+    assert.equal(game.players.filter(p => p.human).length, count);
+    assert.equal(game.players.filter(p => !p.human).length, 4 - count);
+    assert.deepEqual(game.players.map(({ name, human }) => ({ name, human })), roomPlayers(count));
+    for (const seat of humanSeats(count)) {
+      const view = privateView(game, seat);
+      for (let i = 0; i < 4; i++) assert.equal(view.players[i].hand.length, i === seat ? 15 : 0);
+    }
+  }
+  for (const count of [0, 5, -1, 1.5, '4', null]) assert.throws(() => createGame(12, Math.random, count));
 });
 
 test('each view contains only its owner’s hand and no boneyard or player credentials', () => {
@@ -87,9 +103,9 @@ test('a covered double clears the restriction and own play closes the train', ()
 });
 
 test('complete games preserve tiles, score once, and rotate all round starters', () => {
-  for (const start of [12, 9, 6]) for (let trial = 0; trial < 4; trial++) {
-    const random = seeded(start * 100 + trial);
-    const game = createGame(start, random);
+  for (const start of [12, 9, 6]) for (const count of [1, 2, 3, 4]) {
+    const random = seeded(start * 100 + count);
+    const game = createGame(start, random, count);
     for (let round = 0; round <= start; round++) {
       assert.equal(game.current, round % 4);
       const previous = [...game.total];

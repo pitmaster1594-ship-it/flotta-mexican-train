@@ -16,6 +16,7 @@
       this.onState = onState;
       this.onStatus = onStatus;
       this.available = false;
+      this.maxHumans = 2;
       this.active = false;
       this.connected = false;
       this.busy = false;
@@ -27,6 +28,7 @@
       this.retry = 0;
       this.failures = 0;
       this.lastState = null;
+      this.lobby = null;
       this.roomCode = '';
       this.stored = this.readSession();
       window.addEventListener('online', () => { if (this.active && !this.connected) this.connect(); });
@@ -40,20 +42,22 @@
       try {
         const saved = JSON.parse(localStorage.getItem(SESSION_KEY));
         if (saved && /^[A-HJ-NP-Z2-9]{8}$/.test(saved.code) && /^[a-f0-9-]{72}$/.test(saved.token)
-            && [0, 2].includes(saved.seat) && typeof saved.endpoint === 'string') return saved;
+            && [0, 1, 2, 3].includes(saved.seat) && typeof saved.endpoint === 'string') return saved;
       } catch {}
       return null;
     }
 
     async init() {
       try {
-        const configured = window.FLOTTA_ONLINE_URL || location.origin;
+        const local = ['localhost', '127.0.0.1'].includes(location.hostname);
+        const configured = local ? location.origin : window.FLOTTA_ONLINE_URL || location.origin;
         const endpoint = new URL(configured);
         if (endpoint.protocol !== 'https:' && !['localhost', '127.0.0.1'].includes(endpoint.hostname)) return;
         const { response, data: info } = await requestJSON(endpoint.origin + '/api/info', { cache: 'no-store' }, 6000);
         if (!response.ok || !info.multiplayer || info.version !== 1) return;
         this.endpoint = endpoint.origin;
         this.available = true;
+        this.maxHumans = info.maxHumans === 4 ? 4 : 2;
         if (this.stored?.endpoint !== this.endpoint) this.stored = null;
         this.onStatus();
       } catch { /* Local play remains available when the service cannot be reached. */ }
@@ -80,6 +84,7 @@
         this.active = true;
         this.waiting = true;
         this.lastState = null;
+        this.lobby = null;
         this.roomCode = result.code;
         this.connect();
       } catch (error) {
@@ -96,6 +101,7 @@
       this.active = true;
       this.waiting = true;
       this.lastState = null;
+      this.lobby = null;
       this.message = '';
       this.connect();
       this.onStatus();
@@ -127,6 +133,7 @@
         this.failures = 0;
         this.busy = false;
         this.waiting = data.waiting;
+        this.lobby = data.lobby ?? null;
         this.lastState = data.state;
         clearTimeout(this.commandTimeout);
         this.onState(data.state);
@@ -156,10 +163,11 @@
     }
 
     send(action) {
-      if (!this.active || !this.connected || this.busy || !this.lastState || this.socket?.readyState !== WebSocket.OPEN) return false;
+      if (!this.active || !this.connected || this.busy || this.socket?.readyState !== WebSocket.OPEN) return false;
+      if (!this.lastState && !(action.type === 'start' && this.lobby?.canStart)) return false;
       this.busy = true;
       this.message = '';
-      this.socket.send(JSON.stringify({ ...action, revision: this.lastState.revision, id: crypto.randomUUID() }));
+      this.socket.send(JSON.stringify({ ...action, revision: this.lastState?.revision ?? 0, id: crypto.randomUUID() }));
       this.commandTimeout = setTimeout(() => {
         if (!this.active) return;
         // Never replay a turn blindly after a timeout. Reconnect to read the stored result.
@@ -181,6 +189,7 @@
       this.socket?.close();
       this.socket = null;
       this.lastState = null;
+      this.lobby = null;
       this.message = '';
     }
   }

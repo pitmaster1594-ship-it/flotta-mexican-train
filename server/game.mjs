@@ -2,14 +2,25 @@
 export class GameError extends Error {}
 const requireRule = (ok, message) => { if (!ok) throw new GameError(message); };
 
-export function createGame(startEngine = 12, random = Math.random) {
+export function humanSeats(count = 2) {
+  requireRule(Number.isInteger(count) && count >= 1 && count <= 4, 'Choose 1, 2, 3, or 4 human players.');
+  // Preserve the opposite seats used by existing two-player saved rooms.
+  return count === 2 ? [0, 2] : Array.from({ length: count }, (_, i) => i);
+}
+
+export function roomPlayers(count = 2) {
+  const seats = humanSeats(count);
+  let human = 0, computer = 0;
+  return Array.from({ length: 4 }, (_, seat) => seats.includes(seat)
+    ? { name: `Player ${++human}`, human: true }
+    : { name: `Computer ${++computer}`, human: false });
+}
+
+export function createGame(startEngine = 12, random = Math.random, humanCount = 2) {
   requireRule([12, 9, 6].includes(startEngine), 'Choose a starting double of 12, 9, or 6.');
   const game = {
-    mode: 2, startEngine, engine: startEngine, round: 0, revision: 1, seq: 0,
-    players: [
-      { name: 'Player 1', human: true }, { name: 'Computer 1', human: false },
-      { name: 'Player 2', human: true }, { name: 'Computer 2', human: false },
-    ],
+    mode: humanCount === 1 ? 1 : 2, humanCount, startEngine, engine: startEngine, round: 0, revision: 1, seq: 0,
+    players: roomPlayers(humanCount),
     total: [0, 0, 0, 0],
   };
   dealRound(game, random);
@@ -143,7 +154,8 @@ export function computerStep(game) {
 export function privateView(game, seat) {
   // Other hands and the boneyard never leave the server, including tile IDs.
   return {
-    mode: game.mode, startEngine: game.startEngine, engine: game.engine, round: game.round,
+    mode: game.mode, humanCount: game.humanCount ?? game.players.filter(p => p.human).length,
+    startEngine: game.startEngine, engine: game.engine, round: game.round,
     revision: game.revision, total: [...game.total], current: game.current,
     turnDraw: game.turnDraw, pending: game.pending, passes: game.passes,
     phase: game.phase, notice: game.notice, mex: structuredClone(game.mex),

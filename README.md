@@ -1,6 +1,6 @@
 # Flotta Mexican Train
 
-A double-12 dominoes game for one player against three computers, two players sharing a device, or two players on separate iPads using private online rooms.
+A double-12 dominoes game for one player against three computers, two players sharing a device, or one to four humans on separate devices using private online rooms.
 
 Local play needs no installation. Online multiplayer uses a Cloudflare Worker
 and SQLite Durable Objects. See [deployment and multiplayer setup](DEPLOYMENT.md).
@@ -45,9 +45,7 @@ The in-game house rules explain doubles, drawing, passing, and scoring.
 
 ## Online rooms
 
-On the Cloudflare-hosted game, choose **Create private room**, then enter its
-eight-character code on the second iPad using **Join room**. Both iPads see the
-same trains and scores, but each receives only its own hand. Online rooms save
+Choose **1, 2, 3, or 4 human players**, then **Create private room** (or **Create solo room**). Computers fill the remaining seats at the four-player table. Other players enter the eight-character code using **Join room**. The lobby shows who has joined and connected; Player 1 taps **Start game** when everyone is present. Each device sees the same trains and scores, but receives only its own hand. Online rooms save
 on the server, support reconnection, and expire after 30 days without play.
 **Resume online room** restores your seat on the same browser and device.
 
