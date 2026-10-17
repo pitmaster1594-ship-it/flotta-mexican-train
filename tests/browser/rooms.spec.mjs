@@ -68,7 +68,7 @@ for (const count of [1, 2, 3, 4]) test(`${count} human players: lobby, private h
       const revision = snapshots[i].state.revision;
       await pages[i].locator('[data-sort]').click();
       await expect.poll(() => snapshots[i].state.revision).toBeGreaterThan(revision);
-      await pages[i].locator('[data-arrange]').click();
+      if (i === 0 || i !== count - 1) await pages[i].locator('[data-arrange]').click();
     }
 
     async function takeHumanAction() {
@@ -78,10 +78,15 @@ for (const count of [1, 2, 3, 4]) test(`${count} human players: lobby, private h
       if (state.phase !== 'play') return false;
       const active = pages[seats.indexOf(state.current)];
       await expect(active.locator('.turntitle')).toContainText('your turn');
+      await expect(active.locator('[data-arrange]')).toHaveAttribute('aria-expanded', 'false');
+      await expect(active.locator('.save-status')).toHaveText('Room saved online');
       const revision = state.revision;
       if (await active.locator('#player-hand .suggest').count()) {
-        await active.locator('#player-hand .suggest').first().click();
-        await active.locator('[data-target]:enabled').first().click();
+        await active.locator('#player-hand .suggest').first().tap();
+        await expect(active.locator('#player-hand .sel')).toHaveCount(1);
+        const handCount = await active.locator('#player-hand .tile').count();
+        await active.locator('[data-target]:enabled').first().tap();
+        await expect(active.locator('#player-hand .tile')).toHaveCount(handCount - 1);
       } else if (await active.locator('[data-draw]').isEnabled()) {
         await active.locator('[data-draw]').click();
       } else await active.locator('[data-pass]').click();

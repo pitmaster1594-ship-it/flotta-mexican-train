@@ -56,19 +56,31 @@ for (const allBlocked of [false, true]) test(`HTTPS recovery with ${allBlocked ?
     await expect.poll(() => host.locator(`[data-tile="${id}"]`).getAttribute('aria-pressed'), { intervals: [2200] }).toBe('true');
     await host.waitForTimeout(2300);
     await expect(host.locator(`[data-tile="${id}"]`)).toHaveAttribute('aria-pressed', 'true');
-    for (let turn = 0; turn < 5; turn++) {
+    // Player 2 may arrange while waiting; their turn must become playable automatically.
+    await guest.locator('[data-arrange]').tap();
+    await expect(guest.locator('[data-arrange]')).toHaveAttribute('aria-expanded', 'true');
+    let guestPlayed = false;
+    for (let turn = 0; turn < 30 && !guestPlayed; turn++) {
       await expect.poll(() => state(0)?.players[state(0).current].human).toBe(true);
       const seat = state(0).current, active = pages[seat === 0 ? 0 : 1];
       await expect(active.locator('.turntitle')).toContainText('your turn');
+      await expect(active.locator('[data-arrange]')).toHaveAttribute('aria-expanded', 'false');
       const revision = state(0).revision;
       if (await active.locator('#player-hand .suggest').count()) {
-        await active.locator('#player-hand .suggest').first().click();
-        await active.locator('[data-target]:enabled').first().click();
+        // Arranging during your turn must also leave Play available.
+        await active.locator('[data-arrange]').tap();
+        await active.locator('#player-hand .suggest').first().tap();
+        await expect(active.locator('#player-hand .sel')).toHaveCount(1);
+        const handCount = await active.locator('#player-hand .tile').count();
+        await active.locator('[data-target]:enabled').first().tap();
+        await expect(active.locator('#player-hand .tile')).toHaveCount(handCount - 1);
+        if (seat === 2) guestPlayed = true;
       } else if (await active.locator('[data-draw]').isEnabled()) await active.locator('[data-draw]').click();
       else await active.locator('[data-pass]').click();
       await expect.poll(() => state(0)?.revision).toBeGreaterThan(revision);
       await expect.poll(() => state(1)?.revision).toBeGreaterThan(revision);
     }
+    expect(guestPlayed).toBe(true);
     const ids = await host.locator('#player-hand .tile').evaluateAll(es => es.map(e => e.dataset.tile));
     await host.reload();
     await host.locator('[data-online-resume]').click();
